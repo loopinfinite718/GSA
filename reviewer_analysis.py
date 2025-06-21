@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GitLab Reviewer Analysis Tool
+GitLab Reviewer Behavior Analysis Tool
 
 This script analyzes a specific reviewer's behavior on GitLab merge requests:
 1. Accepts one Reviewer name as input
@@ -9,6 +9,9 @@ This script analyzes a specific reviewer's behavior on GitLab merge requests:
 4. Creates 2 CSV files:
    - Summary CSV: Rankings of who got blocked most, who got most comments, who got most approvals without comments
    - Detailed CSV: Complete record of each comment grouped by PR author
+
+Note: The analysis excludes self-reviews (reviewer commenting on their own PRs) to focus
+on how the reviewer treats other team members' work.
 """
 
 import os
@@ -97,16 +100,19 @@ def analyze_reviewer(gitlab_client: GitLabClient, reviewer_name: str, months: in
         mr_comments = gitlab_client.get_mr_reviews(mr, sentiment_analyzer)
         all_comments.extend(mr_comments)
     
-    # Filter comments by reviewer
-    reviewer_comments = [c for c in all_comments if c.author.lower() == reviewer_name.lower()]
+    # Filter comments by reviewer and exclude self-reviews (reviewer commenting on their own PRs)
+    reviewer_comments = [c for c in all_comments 
+                        if c.author.lower() == reviewer_name.lower() 
+                        and c.mr_author.lower() != reviewer_name.lower()]
     
     if not reviewer_comments:
-        print(f"⚠️  No comments found for reviewer '{reviewer_name}'")
+        print(f"⚠️  No comments found for reviewer '{reviewer_name}' on other people's PRs")
         print("   - Check if the name is correct (case-sensitive)")
         print("   - Verify the reviewer has made comments in the specified period")
+        print("   - Verify the reviewer has reviewed PRs from other team members")
         return {}
     
-    print(f"   Found {len(reviewer_comments)} comments by {reviewer_name}")
+    print(f"   Found {len(reviewer_comments)} comments by {reviewer_name} on other people's PRs")
     
     # Group comments by MR author
     comments_by_author = defaultdict(list)
@@ -199,7 +205,7 @@ def generate_summary_csv(analysis_results: Dict[str, Any], output_file: str) -> 
             'Silent Approvals Rank': approvals_rank
         })
     
-    # Sort by blocked rank for the CSV
+    # Sort by blocked rank for the CSV (primary focus is on who gets blocked the most)
     csv_data.sort(key=lambda x: x['Blocked Rank'])
     
     # Write to CSV
@@ -246,7 +252,7 @@ def generate_detailed_csv(analysis_results: Dict[str, Any], output_file: str) ->
                 'Sentiment Score': f"{comment.sentiment.textblob_score:.2f}"
             })
     
-    # Sort by author and date
+    # Sort by author and date (grouping by author to see patterns per person)
     csv_data.sort(key=lambda x: (x['Author'], x['Comment Date']))
     
     # Write to CSV
@@ -290,7 +296,7 @@ def main() -> int:
     
     args = parser.parse_args()
     
-    print("🔍 GitLab Reviewer Analysis Tool")
+    print("🔍 GitLab Reviewer Behavior Analysis Tool")
     print("=" * 50)
     
     # Load configuration
@@ -299,6 +305,7 @@ def main() -> int:
     print(f"📊 Analyzing reviewer: {args.reviewer_name}")
     print(f"📅 Analysis period: {args.months} months")
     print(f"🎯 GitLab project: {config['project_id']}")
+    print(f"ℹ️  Note: Self-reviews (reviewer commenting on their own PRs) are excluded")
     
     try:
         # Initialize GitLab client
@@ -323,8 +330,8 @@ def main() -> int:
         generate_detailed_csv(analysis_results, args.detailed_csv)
         
         print("\n✅ Analysis complete!")
-        print(f"📊 Summary CSV: {args.summary_csv}")
-        print(f"📋 Detailed CSV: {args.detailed_csv}")
+        print(f"📊 Summary CSV: {args.summary_csv} (shows who has the hardest time getting MRs approved)")
+        print(f"📋 Detailed CSV: {args.detailed_csv} (contains all review comments grouped by PR author)")
         
     except Exception as e:
         print(f"❌ Error during analysis: {e}")
